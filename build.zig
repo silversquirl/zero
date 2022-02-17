@@ -6,7 +6,7 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("zig-editor", "src/main.zig");
+    const exe = b.addExecutable("0", "src/main.zig");
 
     nvg.add(b, exe);
     exe.addIncludeDir("deps/nanovg/examples/include");

@@ -92,7 +92,6 @@ pub const Widget = struct {
     /// Widget size
     size: Vec2 = Vec2{ 0, 0 },
 
-    // FIXME: max_size and min_size are horribly broken
     min_size: OptVec2 = .{ null, null },
     max_size: OptVec2 = .{ null, null },
 
@@ -115,27 +114,28 @@ pub const Widget = struct {
 
     fn layoutMin(self: *Widget) void {
         self.funcs.layoutMin(self);
-        self.clampSize();
+        self.size = clamp(self.size, self.min_size, self.max_size);
     }
     fn layoutFull(self: *Widget, container_size: Vec2) void {
         self.funcs.layoutFull(self, container_size);
-        self.clampSize();
-    }
-
-    fn clampSize(self: *Widget) void {
-        for (self.min_size) |n_opt, i| {
-            if (n_opt) |n| {
-                self.size[i] = @maximum(self.size[i], n);
-            }
-        }
-
-        for (self.max_size) |n_opt, i| {
-            if (n_opt) |n| {
-                self.size[i] = @minimum(self.size[i], n);
-            }
-        }
+        self.size = clamp(self.size, self.min_size, self.max_size);
     }
 };
+
+fn clamp(vec: Vec2, min: OptVec2, max: OptVec2) Vec2 {
+    const min_v = Vec2{
+        min[0] orelse 0,
+        min[1] orelse 0,
+    };
+
+    const max_i = std.math.maxInt(I);
+    const max_v = Vec2{
+        max[0] orelse max_i,
+        max[1] orelse max_i,
+    };
+
+    return @maximum(@minimum(vec, max_v), min_v);
+}
 
 /// A nested box for layout purposes
 pub const Box = struct {
@@ -147,7 +147,15 @@ pub const Box = struct {
 
     /// Direction in which to layout children
     direction: Direction = .row,
-    children: std.ArrayListUnmanaged(*Widget) = .{},
+    children: std.ArrayListUnmanaged(Child) = .{},
+
+    const Child = struct {
+        w: *Widget,
+
+        new_size: Vec2 = undefined,
+        new_clamped: Vec2 = undefined,
+        frozen: bool = false,
+    };
 
     pub fn init(opts: anytype) Box {
         var self = Box{};
@@ -168,8 +176,8 @@ pub const Box = struct {
         self.w.size = .{ 0, 0 };
 
         for (self.children.items) |child| {
-            child.layoutMin();
-            self.w.size[dim] += child.size[dim];
+            child.w.layoutMin();
+            self.w.size[dim] += child.w.size[dim];
         }
     }
 
@@ -177,42 +185,79 @@ pub const Box = struct {
         const self = @fieldParentPtr(Box, "w", widget);
 
         const dim = @enumToInt(self.direction);
-        const extra = total[dim] - self.w.size[dim];
 
-        self.w.size = total;
-        self.w.clampSize();
+        while (true) {
+            var extra = total[dim];
+            var total_growth: I = 0;
+            for (self.children.items) |child| {
+                if (child.frozen) {
+                    extra -|= child.new_clamped[dim];
+                } else {
+                    extra -|= child.w.size[dim];
+                    total_growth += child.w.growth;
+                }
+            }
 
-        var total_growth: I = 0;
-        for (self.children.items) |child| {
-            total_growth += child.growth;
+            var violation: i25 = 0;
+            for (self.children.items) |*child| {
+                if (child.frozen) continue;
+
+                child.new_size = child.w.size;
+                if (total_growth > 0 and child.w.growth > 0) {
+                    child.new_size[dim] += extra * child.w.growth / total_growth;
+                }
+
+                child.new_clamped = clamp(child.new_size, child.w.min_size, child.w.max_size);
+                violation += @as(i25, child.new_clamped[dim]) - child.new_size[dim];
+            }
+
+            const vord = std.math.order(violation, 0);
+            if (vord == .eq) break;
+
+            var all_frozen = true;
+            for (self.children.items) |*child| {
+                if (child.frozen) continue;
+
+                const child_violation = @as(i25, child.new_clamped[dim]) - child.new_size[dim];
+                const cvord = std.math.order(child_violation, 0);
+
+                if (cvord == vord) {
+                    child.frozen = true;
+                } else {
+                    all_frozen = false;
+                }
+            }
+
+            if (all_frozen) break;
         }
 
         var pos = Vec2{ 0, 0 };
-        for (self.children.items) |child| {
-            var child_total = child.size;
-            if (total_growth > 0 and child.growth > 0) {
-                child_total[dim] += extra * child.growth / total_growth;
-            }
-            if (child.expand) {
-                child_total[1 - dim] = @maximum(child_total[1 - dim], total[1 - dim]);
+        for (self.children.items) |*child| {
+            child.frozen = false;
+
+            if (child.w.expand) {
+                child.new_size[1 - dim] = @maximum(child.new_size[1 - dim], total[1 - dim]);
             }
 
-            child.pos = pos;
-            child.layoutFull(child_total);
+            child.w.pos = pos;
+            child.w.layoutFull(child.new_size);
 
-            pos[dim] += child.size[dim];
+            pos[dim] += child.w.size[dim];
         }
+
+        self.w.size = @maximum(self.w.size, total);
+        self.w.size = clamp(self.w.size, self.w.min_size, self.w.max_size);
     }
 
     pub fn addChild(self: *Box, allocator: std.mem.Allocator, child: *Widget) !void {
-        try self.children.append(allocator, child);
+        try self.children.append(allocator, .{ .w = child });
     }
 
     fn draw(widget: *Widget, ctx: *nvg.Context, offset: Vec2) void {
         const self = @fieldParentPtr(Box, "w", widget);
 
         var rng = std.rand.DefaultPrng.init(@ptrToInt(self));
-        const color = randRgb(rng.random(), 1.0);
+        var color = randRgb(rng.random(), 0.05);
 
         ctx.beginPath();
         ctx.roundedRect(
@@ -226,8 +271,13 @@ pub const Box = struct {
         ctx.fillColor(color);
         ctx.fill();
 
+        color.a = 1.0;
+        ctx.strokeColor(color);
+        ctx.strokeWidth(4);
+        ctx.stroke();
+
         for (self.children.items) |child| {
-            child.draw(ctx, offset + self.w.pos);
+            child.w.draw(ctx, offset + self.w.pos);
         }
     }
     fn randRgb(rand: std.rand.Random, alpha: f32) nvg.Color {
@@ -236,8 +286,9 @@ pub const Box = struct {
             rand.floatNorm(f32),
             rand.floatNorm(f32),
         };
-        const mag = @sqrt(@reduce(.Add, vec * vec));
-        vec /= @splat(3, mag);
+        vec = @fabs(vec);
+        const fac = 1 / @reduce(.Max, vec);
+        vec *= @splat(3, fac);
         return nvg.Color.rgbaf(vec[0], vec[1], vec[2], alpha);
     }
 };

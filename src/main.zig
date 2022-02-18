@@ -7,7 +7,10 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     var root = ui.Box{};
-    var a = ui.Box.init(.{});
+    var a = ui.Box.init(.{
+        .min_size = .{ 100, null },
+        .max_size = .{ 500, null },
+    });
     var b = ui.Box.init(.{ .direction = .col });
     var c = ui.Box.init(.{ .growth = 120 });
     var d = ui.Box.init(.{});

@@ -44,6 +44,7 @@ pub const Window = struct {
     }
 
     pub fn deinit(self: *Window) void {
+        try glfw.makeContextCurrent(win);
         self.ctx.deleteGl3();
         self.win.destroy();
     }

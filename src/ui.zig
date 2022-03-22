@@ -44,8 +44,11 @@ pub const Window = struct {
     }
 
     pub fn deinit(self: *Window) void {
-        try glfw.makeContextCurrent(win);
-        self.ctx.deleteGl3();
+        if (glfw.makeContextCurrent(self.win)) |_| {
+            self.ctx.deleteGl3();
+        } else |err| {
+            std.log.warn("Failed to clean up UI: {s}\n", .{@errorName(err)});
+        }
         self.win.destroy();
     }
 

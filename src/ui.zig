@@ -6,12 +6,6 @@ const nvg = @import("nanovg");
 /// An unsigned int that can be losslessly converted to an f32
 pub const I = u24;
 
-/// A 2-vector of unsigned integers that can be losslessly converted to f32
-pub const Vec2 = std.meta.Vector(2, I);
-
-/// A 2-vector of optional unsigned integers that can be losslessly converted to f32
-pub const OptVec2 = [2]?I;
-
 /// A layout direction (row or column)
 pub const Direction = enum { row, col };
 
@@ -19,11 +13,11 @@ pub const Direction = enum { row, col };
 pub const Window = struct {
     child: *Widget,
 
-    size: Vec2,
+    size: [2]I,
     win: glfw.Window,
     ctx: *nvg.Context,
 
-    pub fn init(title: [*:0]const u8, size: Vec2, child: *Widget) !Window {
+    pub fn init(title: [*:0]const u8, size: [2]I, child: *Widget) !Window {
         const win = try glfw.Window.create(size[0], size[1], title, null, null, .{
             .context_version_major = 3,
             .context_version_minor = 3,
@@ -85,19 +79,19 @@ pub const Window = struct {
         self.child.pos = .{ 0, 0 };
         self.child.layoutMin();
         // Subtract 1 here because nvg doesn't render pixels at 0 coords
-        self.child.layoutFull(self.size - Vec2{ 1, 1 });
+        self.child.layoutFull(.{ self.size[0] - 1, self.size[1] - 1 });
     }
 };
 
 /// Generic widget interface for layout, input, and rendering
 pub const Widget = struct {
     /// Widget position relative to parent
-    pos: Vec2 = Vec2{ 0, 0 },
+    pos: [2]I = .{ 0, 0 },
     /// Widget size
-    size: Vec2 = Vec2{ 0, 0 },
+    size: [2]I = .{ 0, 0 },
 
-    min_size: OptVec2 = .{ null, null },
-    max_size: OptVec2 = .{ null, null },
+    min_size: [2]?I = .{ null, null },
+    max_size: [2]?I = .{ null, null },
 
     /// How much to grow compared to siblings. 0 = no growth
     /// 360 is a highly composite number; good for lots of nice ratios
@@ -106,13 +100,13 @@ pub const Widget = struct {
     expand: bool = true,
 
     funcs: struct {
-        draw: fn (*Widget, *nvg.Context, offset: Vec2) void,
+        draw: *const fn (*Widget, *nvg.Context, offset: [2]I) void,
 
-        layoutMin: fn (*Widget) void,
-        layoutFull: fn (*Widget, container_size: Vec2) void,
+        layoutMin: *const fn (*Widget) void,
+        layoutFull: *const fn (*Widget, container_size: [2]I) void,
     },
 
-    fn draw(self: *Widget, ctx: *nvg.Context, offset: Vec2) void {
+    fn draw(self: *Widget, ctx: *nvg.Context, offset: [2]I) void {
         self.funcs.draw(self, ctx, offset);
     }
 
@@ -120,25 +114,28 @@ pub const Widget = struct {
         self.funcs.layoutMin(self);
         self.size = clamp(self.size, self.min_size, self.max_size);
     }
-    fn layoutFull(self: *Widget, container_size: Vec2) void {
+    fn layoutFull(self: *Widget, container_size: [2]I) void {
         self.funcs.layoutFull(self, container_size);
         self.size = clamp(self.size, self.min_size, self.max_size);
     }
 };
 
-fn clamp(vec: Vec2, min: OptVec2, max: OptVec2) Vec2 {
-    const min_v = Vec2{
+fn clamp(vec: [2]I, min: [2]?I, max: [2]?I) [2]I {
+    const min_v = .{
         min[0] orelse 0,
         min[1] orelse 0,
     };
 
     const max_i = std.math.maxInt(I);
-    const max_v = Vec2{
+    const max_v = .{
         max[0] orelse max_i,
         max[1] orelse max_i,
     };
 
-    return @maximum(@minimum(vec, max_v), min_v);
+    return .{
+        @maximum(@minimum(vec[0], max_v[0]), min_v[0]),
+        @maximum(@minimum(vec[1], max_v[1]), min_v[1]),
+    };
 }
 
 /// A nested box for layout purposes
@@ -156,8 +153,8 @@ pub const Box = struct {
     const Child = struct {
         w: *Widget,
 
-        new_size: Vec2 = undefined,
-        new_clamped: Vec2 = undefined,
+        new_size: [2]I = undefined,
+        new_clamped: [2]I = undefined,
         frozen: bool = false,
     };
 
@@ -185,7 +182,7 @@ pub const Box = struct {
         }
     }
 
-    fn layoutFull(widget: *Widget, total: Vec2) void {
+    fn layoutFull(widget: *Widget, total: [2]I) void {
         const self = @fieldParentPtr(Box, "w", widget);
 
         const dim = @enumToInt(self.direction);
@@ -235,7 +232,7 @@ pub const Box = struct {
             if (all_frozen) break;
         }
 
-        var pos = Vec2{ 0, 0 };
+        var pos = [2]I{ 0, 0 };
         for (self.children.items) |*child| {
             child.frozen = false;
 
@@ -249,7 +246,10 @@ pub const Box = struct {
             pos[dim] += child.w.size[dim];
         }
 
-        self.w.size = @maximum(self.w.size, total);
+        self.w.size = .{
+            @maximum(self.w.size[0], total[0]),
+            @maximum(self.w.size[1], total[1]),
+        };
         self.w.size = clamp(self.w.size, self.w.min_size, self.w.max_size);
     }
 
@@ -257,7 +257,7 @@ pub const Box = struct {
         try self.children.append(allocator, .{ .w = child });
     }
 
-    fn draw(widget: *Widget, ctx: *nvg.Context, offset: Vec2) void {
+    fn draw(widget: *Widget, ctx: *nvg.Context, offset: [2]I) void {
         const self = @fieldParentPtr(Box, "w", widget);
 
         var rng = std.rand.DefaultPrng.init(@ptrToInt(self));
@@ -281,7 +281,10 @@ pub const Box = struct {
         ctx.stroke();
 
         for (self.children.items) |child| {
-            child.w.draw(ctx, offset + self.w.pos);
+            child.w.draw(ctx, .{
+                offset[0] + self.w.pos[0],
+                offset[1] + self.w.pos[1],
+            });
         }
     }
     fn randRgb(rand: std.rand.Random, alpha: f32) nvg.Color {

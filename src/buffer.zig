@@ -203,6 +203,38 @@ pub const Buffer = struct {
         }
     }
 
+    /// Scan a mark forward or backward to the next of a given byte. If the byte is not found, the cursor is not moved.
+    /// Returns true if that byte was found, false otherwise
+    pub fn scan(self: *Buffer, m: Mark, b: u8, direction: Direction) !bool {
+        const start = try self.mark(.{ .mark = m });
+        defer self.unmark(start);
+        errdefer self.remark(m, .{ .mark = start }) catch unreachable;
+
+        const pos = &self.marks.items[m.i].pos;
+        self.checkMark(pos.*);
+        while (pos.seg > 0 or pos.off > 0) {
+            try self.move(m, switch (direction) {
+                .forward => 1,
+                .backward => -1,
+            });
+
+            // check upper bound
+            if (pos.seg == self.segments.items.len - 1 and
+                pos.off == self.segments.items[pos.seg].len)
+            {
+                break;
+            }
+
+            if (self.get(m) == b) {
+                return true;
+            }
+        }
+
+        self.remark(m, .{ .mark = start }) catch unreachable;
+        return false;
+    }
+    pub const Direction = enum { forward, backward };
+
     /// Create a reader from the buffer, linked to the specified mark.
     /// The mark will be moved when the reader advances.
     pub fn readerAt(self: *Buffer, m: Mark) Reader {
@@ -532,6 +564,37 @@ test "delete" {
 
     try buf.remark(a, .start);
     try expectRead("b" ** 19_000 ++ "a" ** 19_000, buf.readerAt(a));
+}
+
+test "scan" {
+    var buf = try Buffer.init(std.testing.allocator);
+    defer buf.deinit();
+
+    const a = try buf.mark(.start);
+    try buf.insert(a, "a" ** 20_000);
+    try buf.insert(a, "asdjflka;jiojwla;jsd");
+    try buf.remark(a, .start);
+    try buf.insert(a, "asdfasdf;bsdfasdf;");
+    try buf.insert(a, "b" ** 20_000);
+
+    const b = try buf.mark(.{ .mark = a });
+    const b_pos = &buf.marks.items[b.i].pos;
+
+    try expectEqualPos(.{ .seg = 1, .off = 0 }, b_pos.*);
+    try std.testing.expect(try buf.scan(b, ';', .backward));
+    try expectEqualPos(.{ .seg = 0, .off = 17 }, b_pos.*);
+    try std.testing.expect(try buf.scan(b, ';', .backward));
+    try expectEqualPos(.{ .seg = 0, .off = 8 }, b_pos.*);
+    try std.testing.expect(!try buf.scan(b, ';', .backward));
+    try expectEqualPos(.{ .seg = 0, .off = 8 }, b_pos.*);
+
+    try buf.remark(b, .{ .mark = a });
+    try expectEqualPos(.{ .seg = 1, .off = 0 }, b_pos.*);
+    try std.testing.expect(try buf.scan(b, ';', .forward));
+    try expectEqualPos(.{ .seg = 1, .off = 20_000 + 8 }, b_pos.*);
+    try std.testing.expect(try buf.scan(b, ';', .forward));
+    try expectEqualPos(.{ .seg = 1, .off = 20_000 + 16 }, b_pos.*);
+    try std.testing.expect(!try buf.scan(b, ';', .forward));
 }
 
 fn expectRead(expected: []const u8, r: anytype) !void {

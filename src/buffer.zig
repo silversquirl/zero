@@ -101,8 +101,8 @@ pub const Buffer = struct {
                 .off = 0,
             },
             .end => .{
-                .seg = @intCast(u32, self.segments.items.len - 1),
-                .off = @intCast(u32, self.segments.items[self.segments.items.len - 1].len),
+                .seg = @intCast(self.segments.items.len - 1),
+                .off = @intCast(self.segments.items[self.segments.items.len - 1].len),
             },
             .mark => |m| self.marks.items[m.i].pos,
         } };
@@ -125,7 +125,7 @@ pub const Buffer = struct {
         const entry = &self.marks.items[m.i];
 
         // OPTIM: record index in the segment's marks on the mark pos?
-        for (self.seg_marks.items[entry.pos.seg].items) |idx, i| {
+        for (self.seg_marks.items[entry.pos.seg].items, 0..) |idx, i| {
             if (idx == m.i) {
                 _ = self.seg_marks.items[entry.pos.seg].swapRemove(i);
                 break;
@@ -159,7 +159,7 @@ pub const Buffer = struct {
             }
         }
 
-        pos.off = @minimum(
+        pos.off = @min(
             std.math.lossyCast(u32, pos.off + off),
             self.segments.items[pos.seg].len,
         );
@@ -167,7 +167,7 @@ pub const Buffer = struct {
         // Add to new segment
         try self.seg_marks.items[pos.seg].append(self.allocator, m.i);
         // Remove from old segment
-        for (self.seg_marks.items[start_seg].items) |idx, i| {
+        for (self.seg_marks.items[start_seg].items, 0..) |idx, i| {
             if (idx == m.i) {
                 _ = self.seg_marks.items[start_seg].swapRemove(i);
                 break;
@@ -247,7 +247,7 @@ pub const Buffer = struct {
         mark: Mark,
 
         fn read(self: ReaderState, buffer: []u8) ReadError!usize {
-            for (buffer) |*b, i| {
+            for (buffer, 0..) |*b, i| {
                 b.* = self.buf.get(self.mark) orelse return i;
                 try self.buf.move(self.mark, 1);
             } else {
@@ -260,13 +260,13 @@ pub const Buffer = struct {
     pub fn insert(self: *Buffer, m: Mark, data: []const u8) !void {
         // TODO: handle >4GiB insertions?
 
-        var pos = self.marks.items[m.i].pos;
+        const pos = self.marks.items[m.i].pos;
         self.checkMark(pos);
 
         if (self.canDirectlyModify(pos)) |pos2| {
             const seg = &self.segments.items[pos2.seg];
             try self.layers.items[seg.layer].insertSlice(self.allocator, pos2.off, data);
-            seg.len += @intCast(u32, data.len); // FIXME: segments should not grow over 4GiB
+            seg.len += @intCast(data.len); // FIXME: segments should not grow over 4GiB
             self.filled_size += data.len;
 
             // Fix marks within this segment
@@ -274,7 +274,7 @@ pub const Buffer = struct {
                 const seg_pos = &self.marks.items[idx].pos;
                 std.debug.assert(seg_pos.seg == pos2.seg);
                 if (seg_pos.off >= pos2.off) {
-                    seg_pos.off += @intCast(u32, data.len);
+                    seg_pos.off += @intCast(data.len);
                 }
             }
         } else {
@@ -284,7 +284,7 @@ pub const Buffer = struct {
             var layer = std.ArrayListUnmanaged(u8){};
             errdefer layer.deinit(self.allocator);
             try layer.appendSlice(self.allocator, data);
-            const layer_i = @intCast(u32, self.layers.items.len);
+            const layer_i: u32 = @intCast(self.layers.items.len);
             try self.layers.append(self.allocator, layer);
             errdefer _ = self.layers.swapRemove(layer_i);
 
@@ -292,7 +292,7 @@ pub const Buffer = struct {
             try self.insertSegment(pos, .{
                 .layer = layer_i,
                 .off = 0,
-                .len = @intCast(u32, data.len),
+                .len = @intCast(data.len),
             });
             self.filled_size += data.len;
         }

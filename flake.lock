@@ -16,7 +16,28 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "zig": "zig"
+      }
+    },
+    "zig": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1756522052,
+        "narHash": "sha256-sX0lwuwV9pz0JuwqP6/G9AgpctsD8XtQbYjFQ63VsF8=",
+        "owner": "silversquirl",
+        "repo": "zig-flake",
+        "rev": "64d86b844a5823b2dea494a75fbaef165b7ddcee",
+        "type": "github"
+      },
+      "original": {
+        "owner": "silversquirl",
+        "repo": "zig-flake",
+        "type": "github"
       }
     }
   },

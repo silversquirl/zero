@@ -14,19 +14,21 @@ const Selection = struct {
 text: std.ArrayListUnmanaged(u8),
 selections: std.ArrayListUnmanaged(Selection),
 
-pub fn init(gpa: std.mem.Allocator, capacity: usize) !Buffer {
-    var buf: Buffer = .{
-        .text = .{},
-        .selections = .{},
-    };
-    errdefer buf.deinit(gpa);
-    try buf.text.ensureTotalCapacity(gpa, capacity);
-    return buf;
-}
+pub const empty: Buffer = .{
+    .text = .empty,
+    .selections = .empty,
+};
 
-fn deinit(buf: *Buffer, gpa: std.mem.Allocator) void {
+pub fn deinit(buf: *Buffer, gpa: std.mem.Allocator) void {
     buf.text.deinit(gpa);
     buf.selections.deinit(gpa);
+}
+
+pub fn fromOwnedSlice(data: []u8) Buffer {
+    return .{
+        .text = .fromOwnedSlice(data),
+        .selections = .empty,
+    };
 }
 
 pub fn insertBefore(buf: *Buffer, gpa: std.mem.Allocator, text: []const u8) !void {

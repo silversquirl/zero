@@ -1,6 +1,6 @@
 test {
-    _ = buffer;
+    _ = Buffer;
 }
 
 const std = @import("std");
-const buffer = @import("buffer.zig");
+const Buffer = @import("Buffer.zig");
